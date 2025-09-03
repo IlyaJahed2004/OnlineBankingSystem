@@ -5,7 +5,8 @@ CREATE TYPE manager_role AS ENUM ('GeneralManager','OperationsManager','SupportM
 CREATE TYPE transaction_type AS ENUM ('Deposit','Withdrawal','Transfer','Fee','Refund');
 CREATE TYPE notification_type AS ENUM ('TransactionAlert','LoanApproval','AccountUpdate','TransactionFailure','BankEvent');
 CREATE TYPE reference_type AS ENUM ('Transaction', 'Loan');
-
+CREATE TYPE account_type   AS ENUM ('Savings','Current','Credit');
+CREATE TYPE account_status AS ENUM ('Active','Frozen','Closed');
 
 -- Bank Table
 CREATE TABLE Bank (
@@ -13,7 +14,6 @@ CREATE TABLE Bank (
     BankName VARCHAR(100),
     HeadquartersLocation VARCHAR(255)
 );
-
 
 -- Branch Table
 CREATE TABLE Branch (
@@ -26,7 +26,6 @@ CREATE TABLE Branch (
     FOREIGN KEY (BankID) REFERENCES Bank(BankID)
 );
 
-
 -- Users Table (superclass)
 CREATE TABLE Users (
     UserID SERIAL PRIMARY KEY,  
@@ -35,9 +34,12 @@ CREATE TABLE Users (
     PhoneNumber VARCHAR(20),
     Email VARCHAR(100),
     NationalID CHAR(10) UNIQUE,
-    UserType user_type
+    UserType user_type,
+    PasswordHash TEXT,
+    IsActive BOOLEAN DEFAULT TRUE,
+    CreatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UpdatedAt TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
-
 
 -- UserAddress Table
 CREATE TABLE UserAddress (
@@ -48,7 +50,6 @@ CREATE TABLE UserAddress (
     PRIMARY KEY (UserID, Street, City, ZipCode),
     FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE
 );
-
 
 -- Customer Table (subclass)
 CREATE TABLE Customer (
@@ -61,13 +62,14 @@ CREATE TABLE Customer (
     FOREIGN KEY (CustomerID) REFERENCES Users(UserID) ON DELETE CASCADE
 );
 
-
 -- Manager Table
 CREATE TABLE Manager (
     ManagerID INT PRIMARY KEY,  -- FK to Users(UserID)
     BankID INT NOT NULL,
     BranchCode INT NOT NULL,
     ROLE manager_role,
+    HireDate DATE,
+    EmploymentStatus VARCHAR(20) DEFAULT 'Active',
     CanViewOwnTransactions BOOLEAN,
     CanViewAllTransactions BOOLEAN,
     CanApproveTransactions BOOLEAN,
@@ -77,13 +79,14 @@ CREATE TABLE Manager (
     FOREIGN KEY (BankID, BranchCode) REFERENCES Branch(BankID, BranchCode)
 );
 
-
 -- Employee Table
 CREATE TABLE Employee (
     EmployeeID INT PRIMARY KEY,  -- FK to Users(UserID)
     BankID INT NOT NULL,
     BranchCode INT NOT NULL,
     _POSITION VARCHAR(100),
+    HireDate DATE,
+    EmploymentStatus VARCHAR(20) DEFAULT 'Active',
     CanViewOwnTransactions BOOLEAN,
     CanViewCustomerTransactions BOOLEAN,
     CanPerformTransactions BOOLEAN,
@@ -92,21 +95,20 @@ CREATE TABLE Employee (
     FOREIGN KEY (BankID, BranchCode) REFERENCES Branch(BankID, BranchCode)
 );
 
-
-
 -- BankAccount Table
 CREATE TABLE BankAccount (
     AccountID SERIAL PRIMARY KEY,
     AccountNumber VARCHAR(20) UNIQUE,
     Balance DECIMAL(18,2),
     OpeningDate DATE,
-    UserID INT NOT NULL,   --FK to Users(UserID)
+    UserID INT NOT NULL,          -- FK to Users(UserID)
     BankID INT NOT NULL,
     BranchCode INT NOT NULL,
+    AccountType account_type NOT NULL,
+    Status account_status NOT NULL DEFAULT 'Active',
     FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE,
     FOREIGN KEY (BankID, BranchCode) REFERENCES Branch(BankID, BranchCode) ON DELETE CASCADE
 );
-
 
 -- BankLoan Table
 CREATE TABLE BankLoan (
@@ -115,18 +117,21 @@ CREATE TABLE BankLoan (
     LoanType VARCHAR(50),
     LoanDate TIMESTAMP,
     UserID INT NOT NULL,
+    Status VARCHAR(20) DEFAULT 'Pending', -- Pending, Approved, Rejected, Closed
+    DueDate DATE,
     FOREIGN KEY (UserID) REFERENCES Users(UserID) ON DELETE CASCADE
 );
-
 
 -- Transactions Table
 CREATE TABLE Transactions (
     TransactionID SERIAL PRIMARY KEY,
     TransactionType transaction_type,
     Amount DECIMAL(18, 2),
-    TransactionDate TIMESTAMP
+    TransactionDate TIMESTAMP,
+    Status VARCHAR(20) DEFAULT 'Completed', -- Pending, Failed, Completed
+    ReferenceNumber VARCHAR(50) UNIQUE,
+    CreatedBy INT REFERENCES Users(UserID)
 );
-
 
 -- TransactionInvolvement Table (many-to-many between Transactions and BankAccounts)
 CREATE TABLE TransactionInvolvement (
@@ -138,16 +143,17 @@ CREATE TABLE TransactionInvolvement (
     FOREIGN KEY (BankAccountID) REFERENCES BankAccount(AccountID) ON DELETE CASCADE
 );  
 
-
 -- Notification Table
 CREATE TABLE Notification (
     NotificationID SERIAL PRIMARY KEY,
     EntityType reference_type NOT NULL,  -- 'Transaction' or 'Loan'
     EntityID INT NOT NULL,                -- ID of the Transaction or Loan
     Message TEXT,
-    NotificationType notification_type,     --  'TransactionAlert','LoanApproval',....
+    NotificationType notification_type,   -- 'TransactionAlert','LoanApproval',...
     NotificationTime TIMESTAMP,
     SentTo INT NOT NULL,
+    IsRead BOOLEAN DEFAULT FALSE,
+    ReadAt TIMESTAMP,
     FOREIGN KEY (SentTo) REFERENCES Users(UserID) ON DELETE CASCADE,
     -- EntityID references Transactions(TransactionID) or BankLoan(LoanID)
     -- Cannot enforce FK due to polymorphic relation, enforce in application logic or triggers
